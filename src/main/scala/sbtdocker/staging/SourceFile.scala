@@ -1,6 +1,7 @@
 package sbtdocker.staging
 
 import java.nio.file.{Files, StandardCopyOption}
+import scala.language.postfixOps
 
 import sbt._
 

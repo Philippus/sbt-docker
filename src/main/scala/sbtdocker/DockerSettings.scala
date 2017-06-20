@@ -23,11 +23,8 @@ object DockerSettings {
 
       DockerPush(dockerPath, imageNames, log)
     },
-    dockerBuildAndPush <<= (docker, dockerPush) { (build, push) =>
-      build.flatMap { id =>
-        push.map(_ => id)
-      }
-    },
+
+    dockerBuildAndPush := Def.taskDyn { dockerPush.map(_ => docker.value) }.value,
     dockerfile in docker := {
       sys.error(
         """A Dockerfile is not defined. Please define one with `dockerfile in docker`
@@ -56,37 +53,39 @@ object DockerSettings {
                                          exposedPorts: Seq[Int],
                                          exposedVolumes: Seq[String],
                                          username: Option[String]) = Seq(
-    docker <<= docker.dependsOn(Keys.`package`.in(Compile, Keys.packageBin)),
-    Keys.mainClass in docker <<= Keys.mainClass in docker or Keys.mainClass.in(Compile, Keys.packageBin),
-    dockerfile in docker <<= (Keys.managedClasspath in Compile, Keys.artifactPath.in(Compile, Keys.packageBin), Keys.mainClass in docker) map {
-      case (_, _, None) =>
-        sys.error("Either there are no main class or there exist several. " +
-          "One can be set with 'mainClass in docker := Some(\"package.MainClass\")'.")
-      case (classpath, artifact, Some(mainClass)) =>
-        val appPath = "/app"
-        val libsPath = s"$appPath/libs/"
-        val artifactPath = s"$appPath/${artifact.name}"
+    docker := docker.dependsOn(Keys.`package`.in(Compile, Keys.packageBin)).value,
+    Keys.mainClass in docker := { Keys.mainClass in docker or Keys.mainClass.in(Compile, Keys.packageBin) }.value,
+    dockerfile in docker := {
+      ((Keys.managedClasspath in Compile).value, Keys.artifactPath.in(Compile, Keys.packageBin).value, (Keys.mainClass in docker).value) match {
+        case (_, _, None) =>
+          sys.error("Either there are no main class or there exist several. " +
+            "One can be set with 'mainClass in docker := Some(\"package.MainClass\")'.")
+        case (classpath, artifact, Some(mainClass)) =>
+          val appPath = "/app"
+          val libsPath = s"$appPath/libs/"
+          val artifactPath = s"$appPath/${artifact.name}"
 
-        val dockerfile = Dockerfile()
-        dockerfile.from(fromImage)
+          val dockerfile = Dockerfile()
+          dockerfile.from(fromImage)
 
-        val libPaths = classpath.files.map { libFile =>
-          val toPath = file(libsPath) / libFile.name
-          dockerfile.stageFile(libFile, toPath)
-          toPath
-        }
-        val classpathString = s"${libPaths.mkString(":")}:$artifactPath"
+          val libPaths = classpath.files.map { libFile =>
+            val toPath = file(libsPath) / libFile.name
+            dockerfile.stageFile(libFile, toPath)
+            toPath
+          }
+          val classpathString = s"${libPaths.mkString(":")}:$artifactPath"
 
-        dockerfile.entryPoint("java", "-cp", classpathString, mainClass)
+          dockerfile.entryPoint("java", "-cp", classpathString, mainClass)
 
-        dockerfile.expose(exposedPorts: _*)
-        dockerfile.volume(exposedVolumes: _*)
-        username.foreach(dockerfile.user)
+          dockerfile.expose(exposedPorts: _*)
+          dockerfile.volume(exposedVolumes: _*)
+          username.foreach(dockerfile.user)
 
-        dockerfile.addRaw(libsPath, libsPath)
-        dockerfile.add(artifact, artifactPath)
+          dockerfile.addRaw(libsPath, libsPath)
+          dockerfile.add(artifact, artifactPath)
 
-        dockerfile
+          dockerfile
+      }
     }
   )
 }
